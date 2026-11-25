@@ -924,12 +924,12 @@
                   <select id="girl-voice-select" class="w-full px-2.5 py-2 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700"></select>
                 </div>
                 <div class="md:col-span-3">
-                  <label class="font-medium block mb-1">Voice Pitch: <span id="girl-pitch-val">1.12</span></label>
-                  <input id="girl-pitch-range" type="range" min="0.8" max="1.5" step="0.02" value="1.12" class="w-full accent-pink-500 mt-1.5" />
+                  <label class="font-medium block mb-1">Voice Pitch (Natural 1.0): <span id="girl-pitch-val">1.00</span></label>
+                  <input id="girl-pitch-range" type="range" min="0.85" max="1.25" step="0.02" value="1.00" class="w-full accent-pink-500 mt-1.5" />
                 </div>
                 <div class="md:col-span-2">
-                  <label class="font-medium block mb-1">Speed: <span id="girl-rate-val">1.0x</span></label>
-                  <input id="girl-rate-range" type="range" min="0.7" max="1.4" step="0.05" value="1.0" class="w-full accent-pink-500 mt-1.5" />
+                  <label class="font-medium block mb-1">Speed (Calm 0.94x): <span id="girl-rate-val">0.94x</span></label>
+                  <input id="girl-rate-range" type="range" min="0.75" max="1.3" step="0.02" value="0.94" class="w-full accent-pink-500 mt-1.5" />
                 </div>
                 <div class="md:col-span-2 flex items-end">
                   <button type="button" id="girl-voice-test-btn" class="w-full py-2 rounded-lg bg-pink-600 text-white font-semibold hover:bg-pink-700">Test Voice</button>
@@ -1167,7 +1167,7 @@
         activeView: 'chat',
         activeProjectId: 'proj-default',
         projects: [
-          { id: 'proj-default', name: 'MahaAI Main Workspace', instructions: 'Respond clearly in Hindi, English, or Hinglish matching user style. Be honest about capabilities.', createdAt: '2026-11-25' },
+          { id: 'proj-default', name: 'MahaAI Main Workspace', instructions: 'Always speak in natural, warm, respectful local Hindi/Hinglish (using आप and जी politely, like a helpful Indian female assistant). Keep spoken answers concise, clear, and conversational without robotic jargon.', createdAt: '2026-11-25' },
           { id: 'proj-dev', name: 'Full-Stack App Builder', instructions: 'Focus on clean architecture, security, and production-ready code.', createdAt: '2026-11-25' }
         ],
         memoryEnabled: true,
@@ -2463,12 +2463,17 @@
       /* ==================== 7. AI AUDIO STUDIO LOGIC ==================== */
       function pickPreferredGirlVoiceIndex(voices) {
         if (!voices || !voices.length) return -1;
-        const femalePatterns = /swara|heera|kalpana|neerja|lekha|aditi|raveena|priya|google हिन्दी|hindi|female|woman|girl|zira|samantha|victoria|karen|veena/i;
-        let idx = voices.findIndex(v => /hi|en-in/i.test(v.lang) && femalePatterns.test(v.name));
+        // Prioritize natural Indian Hindi female voices (Google हिन्दी / Swara / Heera / Neerja / hi-in-x-hia/hic)
+        const topHindiFemale = /google हिन्दी|swara|hi-in-x-hia|hi-in-x-hic|hi-in-x-hid|heera|kalpana|lekha|neerja|aditi|raveena/i;
+        let idx = voices.findIndex(v => /^hi[-_]?in/i.test(v.lang) && topHindiFemale.test(v.name));
         if (idx >= 0) return idx;
-        idx = voices.findIndex(v => femalePatterns.test(v.name));
+        idx = voices.findIndex(v => /^hi/i.test(v.lang) && /female|woman|girl|natural|neural|google/i.test(v.name));
         if (idx >= 0) return idx;
-        idx = voices.findIndex(v => /hi|en-in/i.test(v.lang));
+        idx = voices.findIndex(v => /^hi/i.test(v.lang));
+        if (idx >= 0) return idx;
+        idx = voices.findIndex(v => /en[-_]in/i.test(v.lang) && /neerja|heera|veena|raveena|female|google/i.test(v.name));
+        if (idx >= 0) return idx;
+        idx = voices.findIndex(v => /female|woman|girl|samantha|zira/i.test(v.name));
         return idx >= 0 ? idx : 0;
       }
       function populateVoices() {
@@ -2487,21 +2492,39 @@
         populateVoices();
         window.speechSynthesis.onvoiceschanged = populateVoices;
       }
+      function cleanTextForNaturalSpeech(raw) {
+        return String(raw || '')
+          .replace(/```[\s\S]*?```/g, ' कोड स्क्रीन पर दिखाया गया है। ')
+          .replace(/https?:\/\/\S+/g, '')
+          .replace(/[*#`_>~|\[\](){}]/g, ' ')
+          .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/gu, '')
+          .replace(/\s+/g, ' ')
+          .trim();
+      }
       function speakText(text, useGirlSettings) {
         if (!('speechSynthesis' in window)) { showToast('Speech synthesis not supported in this browser', 'warn'); return; }
         window.speechSynthesis.cancel();
-        const clean = String(text || '').replace(/[*#`_>]/g, '').trim();
+        const clean = cleanTextForNaturalSpeech(text);
         if (!clean) return;
-        const u = new SpeechSynthesisUtterance(clean);
         const voices = window.speechSynthesis.getVoices() || [];
         const gSel = $('girl-voice-select');
         const tSel = $('tts-voice-select');
         const idx = Number((useGirlSettings && gSel && gSel.value !== '') ? gSel.value : (tSel && tSel.value !== '' ? tSel.value : pickPreferredGirlVoiceIndex(voices)));
-        if (voices[idx]) u.voice = voices[idx];
-        u.lang = (voices[idx] && voices[idx].lang) || 'hi-IN';
-        u.pitch = useGirlSettings && $('girl-pitch-range') ? Number($('girl-pitch-range').value) || 1.12 : 1.1;
-        u.rate = useGirlSettings && $('girl-rate-range') ? Number($('girl-rate-range').value) || 1.0 : (Number($('tts-rate').value) || 1.0);
-        window.speechSynthesis.speak(u);
+        const chosenVoice = voices[idx] || voices[pickPreferredGirlVoiceIndex(voices)] || null;
+        const pitchVal = useGirlSettings && $('girl-pitch-range') ? Number($('girl-pitch-range').value) || 1.0 : 1.0;
+        const rateVal = useGirlSettings && $('girl-rate-range') ? Number($('girl-rate-range').value) || 0.94 : (Number($('tts-rate').value) || 0.94);
+
+        // Split into short natural sentences so speech breathes naturally like a human
+        const sentences = clean.split(/(?<=[।.!?])\s+/).map(x => x.trim()).filter(Boolean).slice(0, 12);
+        const chunks = sentences.length ? sentences : [clean.slice(0, 400)];
+        chunks.forEach((part) => {
+          const u = new SpeechSynthesisUtterance(part);
+          if (chosenVoice) u.voice = chosenVoice;
+          u.lang = (chosenVoice && chosenVoice.lang) || 'hi-IN';
+          u.pitch = pitchVal;
+          u.rate = rateVal;
+          window.speechSynthesis.speak(u);
+        });
       }
       function stopSpeech() {
         if ('speechSynthesis' in window) window.speechSynthesis.cancel();
@@ -3149,7 +3172,7 @@ END:VCARD`;
       $('girl-pitch-range').addEventListener('input', (e) => { $('girl-pitch-val').textContent = e.target.value; });
       $('girl-rate-range').addEventListener('input', (e) => { $('girl-rate-val').textContent = e.target.value + 'x'; });
       $('girl-voice-test-btn').addEventListener('click', () => {
-        speakText('नमस्ते! मैं महा एआई हूँ। अब मैं आपकी आवाज़ सुनकर कैमरा ऑन कर सकती हूँ, फोटो क्लिक कर सकती हूँ और नंबर सेव कर सकती हूँ।', true);
+        speakText('नमस्ते जी! मैं महा एआई हूँ। बताइए, आज मैं आपकी क्या मदद कर सकती हूँ? आप जो भी कहेंगे, मैं बिल्कुल आराम से और अच्छे से कर दूँगी।', true);
       });
       $('phone-stop-voice-btn').addEventListener('click', stopSpeech);
 
