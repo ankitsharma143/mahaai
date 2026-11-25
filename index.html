@@ -175,6 +175,11 @@
             <span class="hidden sm:inline">Install App</span>
           </button>
 
+          <!-- Instant Stop Speaking Button -->
+          <button type="button" id="header-mute-btn" class="p-2 rounded-lg bg-rose-500/15 text-rose-600 dark:text-rose-400 hover:bg-rose-500/25 border border-rose-500/30 transition" title="Stop Speaking (Chup Ho Jao)" aria-label="Stop Speaking">
+            <i data-lucide="volume-x" class="w-4 h-4"></i>
+          </button>
+
           <!-- Quick Live Voice Mode Button -->
           <button type="button" id="header-voice-mode-btn" class="px-2.5 py-1.5 rounded-lg bg-pink-500/15 text-pink-600 dark:text-pink-400 hover:bg-pink-500/25 border border-pink-500/30 text-xs font-semibold flex items-center gap-1.5 transition" title="Bolkar &amp; Sunkar Baat Karein (MahaAI Girl Voice)">
             <i data-lucide="mic" class="w-3.5 h-3.5"></i>
@@ -2559,6 +2564,7 @@
           recognition.stop();
           return;
         }
+        stopSpeech();
         recognition = new SR();
         recognition.lang = $('stt-lang-select').value || 'hi-IN';
         recognition.interimResults = false;
@@ -3049,6 +3055,7 @@ END:VCARD`;
       function executePhoneCommand(rawCmd) {
         const cmd = (rawCmd || '').trim();
         if (!cmd) return;
+        if (handleVoiceObedienceCommand(cmd)) return;
         const lower = cmd.toLowerCase();
         switchView('phone');
 
@@ -3198,6 +3205,7 @@ END:VCARD`;
           setPhoneReply('इस ब्राउज़र में लाइव माइक स्पीच रिकग्निशन उपलब्ध नहीं है। आप नीचे कमांड टाइप या क्विक बटन पर क्लिक करके टेस्ट कर सकते हैं।', true);
           return;
         }
+        stopSpeech();
         const rec = new SR();
         rec.lang = 'hi-IN';
         rec.interimResults = false;
@@ -3377,6 +3385,7 @@ END:VCARD`;
         wakeRec.interimResults = false;
         wakeRec.onresult = (ev) => {
           const last = ev.results[ev.results.length - 1][0].transcript.trim();
+          if (handleVoiceObedienceCommand(last)) return;
           if (/janu|जानू|mahaai|महा/i.test(last)) {
             $('phone-cmd-input').value = last;
             executePhoneCommand(last);
@@ -3807,6 +3816,7 @@ END:VCARD`;
       }
 
       async function tryAutoSwitchStudio(promptText) {
+        if (handleVoiceObedienceCommand(promptText)) return true;
         const lower = (promptText || '').toLowerCase();
 
         // 1. Phone / Camera / Call / Contact / Settings command right from Chat!
@@ -3859,6 +3869,50 @@ END:VCARD`;
           $('img-prompt-input').value = promptText;
           $('img-generate-local-btn').click();
           speakText('जी, मैंने आपका ग्राफिक तैयार कर दिया है। आप इसे एडिट या डाउनलोड कर सकते हैं।', true);
+          return true;
+        }
+
+        return false;
+      }
+
+      
+      /* ==================== RESPECTFUL VOICE OBEDIENCE: CHUP HO JAO / MAT SUNO / AB BOLO ==================== */
+      $('header-mute-btn').addEventListener('click', () => {
+        stopSpeech();
+        showToast('जी, बोलना रोक दिया गया है।', 'info');
+      });
+
+      function handleVoiceObedienceCommand(rawText) {
+        const t = String(rawText || '').trim().toLowerCase();
+        if (!t) return false;
+
+        // 1. Stop Listening ("ab mat suno", "sunna band kro", "stop listening")
+        if (/(mat suno|mt suno|मत सुनो|sunna band|सुनना बंद|stop listening|mic band|माइक बंद|listening off|wake.?word.*(band|off))/.test(t)) {
+          stopSpeech();
+          wakeWordActive = false;
+          if (wakeRec) { try { wakeRec.stop(); } catch (e) {} }
+          if (recognition) { try { recognition.stop(); } catch (e) {} }
+          if ($('phone-wakeword-btn')) $('phone-wakeword-btn').textContent = 'Wake-Word "Janu": OFF';
+          if ($('phone-assistant-reply')) $('phone-assistant-reply').innerHTML = '<strong>MahaAI:</strong> जी बिल्कुल, मैंने सुनना बंद कर दिया है। जब ज़रूरत हो तो माइक बटन दबा दीजिएगा।';
+          showToast('जी, MahaAI ने सुनना बंद कर दिया है।', 'info');
+          return true;
+        }
+
+        // 2. Stop Speaking / Be Quiet ("chup ho jao", "bas ab nahi bolna", "ab mat bolo", "stop speaking", "quiet")
+        if (/(chup|चुप|nahi bolna|nhi bolna|नहीं बोलना|mat bolo|mt bolo|मत बोलो|bolna band|बोलना बंद|bas karo|bs kro|बस करो|bas ab|stop speaking|be quiet|silent|shut up)/.test(t)) {
+          stopSpeech();
+          if ($('chat-autospeak-toggle')) $('chat-autospeak-toggle').checked = false;
+          if ($('phone-assistant-reply')) $('phone-assistant-reply').innerHTML = '<strong>MahaAI:</strong> जी बिल्कुल, मैं चुप हो गई हूँ। अब मैं सिर्फ लिखकर जवाब दूँगी—जब दोबारा सुनना हो तो "अब बोलो" कह दीजिएगा।';
+          showToast('जी, मैं चुप हो गई हूँ (Auto-Speak OFF)।', 'info');
+          return true;
+        }
+
+        // 3. Resume Speaking ("ab bolo", "bolna chalu kro", "speak again")
+        if (/(ab bolo|अब बोलो|bolna chalu|बोलना चालू|speak again|auto.?speak on|awaj chalu|आवाज़ चालू)/.test(t)) {
+          if ($('chat-autospeak-toggle')) $('chat-autospeak-toggle').checked = true;
+          const msg = 'जी बिल्कुल, अब मैं फिर से बोलकर जवाब दूँगी। बताइए, क्या मदद करूँ?';
+          if ($('phone-assistant-reply')) $('phone-assistant-reply').innerHTML = '<strong>MahaAI:</strong> ' + msg;
+          speakText(msg, true);
           return true;
         }
 
