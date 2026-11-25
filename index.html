@@ -257,6 +257,10 @@
                 </button>
               </div>
               <div class="flex items-center gap-1.5">
+                <label class="px-2 py-1 rounded-lg bg-indigo-500/15 text-indigo-600 dark:text-indigo-400 flex items-center gap-1 cursor-pointer text-[11px] font-medium" title="Automatically switch to Video, Image, Website or Phone Studio when needed">
+                  <input id="chat-autoswitch-toggle" type="checkbox" checked class="accent-indigo-500" />
+                  <span>Auto-Switch</span>
+                </label>
                 <label class="px-2 py-1 rounded-lg bg-pink-500/15 text-pink-600 dark:text-pink-400 flex items-center gap-1 cursor-pointer text-[11px] font-medium" title="Auto-speak AI replies in Girl Voice">
                   <input id="chat-autospeak-toggle" type="checkbox" checked class="accent-pink-500" />
                   <span>Auto-Speak</span>
@@ -1490,7 +1494,7 @@
 
       async function generateAIResponse(promptText, contextMessages, systemPrompt) {
         let model = getActiveModel();
-        if (model.type === 'builtin') {
+        if (model.type === 'builtin' || (model.type !== 'local' && !model.apiKey)) {
           const readyCloud = state.models.find(m => m.type !== 'builtin' && m.type !== 'local' && m.apiKey && isSafeHttpsUrl(m.endpoint));
           if (readyCloud) model = readyCloud;
         }
@@ -1814,7 +1818,7 @@
 
         const chat = getActiveChat();
         if (!chat) return;
-        if (overrideText == null) input.value = '';
+        input.value = '';
 
         const attachSummary = state.pendingAttachments.length
           ? '\n\n[Attached: ' + state.pendingAttachments.map(a => a.name + (a.preview ? ' (' + a.preview.slice(0, 120) + ')' : '')).join(', ') + ']'
@@ -1834,6 +1838,16 @@
         renderAttachmentsPreview();
         renderChatList();
         renderChatMessages();
+
+        // Smart Auto-Switch Studio Router (Active when Auto-Switch is ON!)
+        const autoSwitchOn = !$('chat-autoswitch-toggle') || $('chat-autoswitch-toggle').checked;
+        if (autoSwitchOn && text) {
+          const handled = await tryAutoSwitchStudio(text);
+          if (handled) {
+            if (!chat.temporary) saveState();
+            return;
+          }
+        }
 
         // Streaming / Generation state
         isGenerating = true;
@@ -2554,10 +2568,12 @@
         recognition.onresult = (ev) => {
           const transcript = (ev.results[0][0].transcript || '').trim();
           const el = $(targetInputId);
-          el.value = (el.value ? el.value + ' ' : '') + transcript;
           showToast('Voice captured!', 'success');
           if (targetInputId === 'chat-input' && transcript) {
-            sendChatMessage(el.value.trim(), true);
+            el.value = '';
+            sendChatMessage(transcript, true);
+          } else if (el) {
+            el.value = (el.value ? el.value + ' ' : '') + transcript;
           }
         };
         recognition.start();
@@ -3773,6 +3789,81 @@ END:VCARD`;
             </div>`, [{ label: 'OK', className: 'px-4 py-2 rounded-xl bg-indigo-600 text-white text-xs font-semibold', onClick: closeModal }]);
         }
       });
+
+      
+      /* ==================== AUTONOMOUS STUDIO AUTO-ROUTER (ALWAYS AUTO + OPTIONAL MANUAL) ==================== */
+      function buildAutoStoryForTopic(promptText) {
+        const lower = (promptText || '').toLowerCase();
+        if (/horror|हॉरर|bhoot|भूत|darawni|डरावनी|ghost/.test(lower)) {
+          return 'रात के बारह बजे एक पुराने सुनसान महल में बिजली चमक उठी। आरव ने धीरे से भारी लकड़ी का दरवाज़ा खोला और अंदर अजीब सी सरसराहट सुनाई दी। अचानक दीवार पर एक पुरानी तस्वीर हिली और ठंडी हवा का झोंका पूरे कमरे में फैल गया। टॉर्च की रोशनी में उसे एक रहस्यमयी परछाईं दिखी जो एक पुराने तहखाने की तरफ इशारा कर रही थी। हिम्मत जुटाकर आरव ने उस रहस्य को सुलझाया और सुबह की पहली किरण के साथ महल का श्राप हमेशा के लिए खत्म हो गया।';
+        }
+        if (/love|लव|romantic|प्यार/.test(lower)) {
+          return 'बारिश की एक शाम रेलवे स्टेशन पर दो अजनबियों की पहली मुलाकात हुई। एक छोटी सी मुस्कान और चाय के दो कप से उनकी दोस्ती की शुरुआत हुई। वक्त के साथ दोनों ने हर मुश्किल में एक-दूसरे का साथ दिया। आखिरकार उसी स्टेशन पर उन्होंने हमेशा साथ रहने का वादा किया।';
+        }
+        if (/sci-fi|space|अंतरिक्ष|robot|रोबोट|future/.test(lower)) {
+          return 'साल 2050 में भारत का पहला डीप-स्पेस यान महा-वन मंगल ग्रह की कक्षा में पहुँचा। यान के एआई सिस्टम ने सतह के नीचे एक प्राचीन ऊर्जा स्रोत का पता लगाया। वैज्ञानिकों की टीम ने रोवर उतारकर मानव इतिहास की सबसे बड़ी खोज दुनिया को दिखाई। यह नई सुबह पूरे ब्रह्मांड में इंसान के अगले कदम की शुरुआत थी।';
+        }
+        return `${promptText}। कहानी की शुरुआत एक शांत सुबह से होती है जहाँ मुख्य किरदार एक बड़े सपने के साथ सफर शुरू करता है। रास्ते में कई रोमांचक मोड़ और चुनौतियाँ आती हैं जिन्हें वह सूझबूझ से पार करता है। अंत में मेहनत और विश्वास से शानदार जीत हासिल होती है।`;
+      }
+
+      async function tryAutoSwitchStudio(promptText) {
+        const lower = (promptText || '').toLowerCase();
+
+        // 1. Phone / Camera / Call / Contact / Settings command right from Chat!
+        if (/(camera|कैमरा).*(on|off|kholo|band|ऑन|बंद|खोलो)|(photo|फोटो).*(click|khicho|क्लिक|खींचो)|(call|कॉल).*\d{5,}|(save|सेव).*\d{5,}|(brightness|ब्राइटनेस|wifi|वाईफाई|torch|टॉर्च|battery|बैटरी)/.test(lower)) {
+          executePhoneCommand(promptText);
+          return true;
+        }
+
+        // 2. Movie / Video Creation right from Chat!
+        if (/(movie|मूवी|video|वीडियो|film|फिल्म)/.test(lower) && /(bna|बना|create|make|render|story|स्टोरी|कहानी)/.test(lower)) {
+          let story = promptText;
+          // If short request like "एक हॉरर मूवी की स्टोरी लिखकर मूवी बना दो", generate a rich multi-scene story!
+          if (promptText.split(/\s+/).length < 22) {
+            // Try cloud LLM first if configured, otherwise use built-in genre story generator
+            const readyCloud = state.models.find(m => m.type !== 'builtin' && m.type !== 'local' && m.apiKey && isSafeHttpsUrl(m.endpoint));
+            if (readyCloud) {
+              try {
+                const res = await generateAIResponse('Write a 5-sentence dramatic Hindi story (5 short sentences separated by full stops, no headings) for: ' + promptText, [], 'Write only 5 vivid story sentences in Hindi.');
+                if (res && res.text && res.text.length > 40) story = res.text.replace(/[*#`]/g, '').trim();
+                else story = buildAutoStoryForTopic(promptText);
+              } catch (e) {
+                story = buildAutoStoryForTopic(promptText);
+              }
+            } else {
+              story = buildAutoStoryForTopic(promptText);
+            }
+          }
+          switchView('video');
+          $('video-prompt-input').value = story;
+          if (/horror|हॉरर|bhoot|भूत/.test(lower)) $('video-anim-style').value = 'neon';
+          else $('video-anim-style').value = 'cinematic';
+          $('video-generate-plan-btn').click();
+          speakText('जी बिल्कुल! मैंने आपकी मूवी की कहानी और सारे सीन तैयार कर दिए हैं। अब मैं आपकी मूवी रेंडर कर रही हूँ, कृपया कुछ सेकंड इंतज़ार करें।', true);
+          setTimeout(() => { renderRealAnimatedVideo(); }, 450);
+          return true;
+        }
+
+        // 3. Website Creation right from Chat!
+        if (/(website|वेबसाइट|landing page|portfolio)/.test(lower) && /(bna|बना|create|make|build)/.test(lower)) {
+          switchView('website');
+          $('wb-prompt-input').value = promptText;
+          generateWebsite();
+          speakText('जी, मैंने आपकी वेबसाइट तैयार कर दी है। आप स्क्रीन पर इसका लाइव प्रीव्यू देख सकते हैं।', true);
+          return true;
+        }
+
+        // 4. Image / Poster Creation right from Chat!
+        if (/(image|इमेज|poster|पोस्टर|photo design|graphic)/.test(lower) && /(bna|बना|create|make|generate)/.test(lower)) {
+          switchView('image');
+          $('img-prompt-input').value = promptText;
+          $('img-generate-local-btn').click();
+          speakText('जी, मैंने आपका ग्राफिक तैयार कर दिया है। आप इसे एडिट या डाउनलोड कर सकते हैं।', true);
+          return true;
+        }
+
+        return false;
+      }
 
       /* ==================== INITIALIZATION ==================== */
       function init() {
